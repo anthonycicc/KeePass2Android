@@ -21,7 +21,7 @@ namespace keepass2android.Io
 	{
 		protected string Protocol { get { return _jfs.ProtocolId; } }
 
-		public IEnumerable<string> SupportedProtocols { get { yield return Protocol; } }
+		public virtual IEnumerable<string> SupportedProtocols { get { yield return Protocol; } }
 
 
 		private readonly IJavaFileStorage _jfs;
@@ -294,11 +294,6 @@ namespace keepass2android.Io
 			return false; //TODO implement. note, however, that we MAY return false even if it's read-only
 		}
 
-		public void ResolveAccount(IOConnectionInfo ioc)
-		{
-			
-		}
-
 		public void OnCreate(IFileStorageSetupActivity activity, Bundle savedInstanceState)
 		{
 			_jfs.OnCreate(((IJavaFileStorageFileStorageSetupActivity)activity), savedInstanceState);
@@ -357,7 +352,7 @@ namespace keepass2android.Io
 
 		}
 
-		public string IocToPath(IOConnectionInfo ioc)
+		public virtual string IocToPath(IOConnectionInfo ioc)
 		{
 			return ioc.Path;
 		}

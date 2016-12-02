@@ -38,7 +38,12 @@
     <EmbedAssembliesIntoApk>False</EmbedAssembliesIntoApk>
     <Debugger>Xamarin</Debugger>
     <DevInstrumentationEnabled>True</DevInstrumentationEnabled>
-    <AndroidSupportedAbis>armeabi;armeabi-v7a;x86</AndroidSupportedAbis>
+    <AndroidSupportedAbis>armeabi,armeabi-v7a,x86</AndroidSupportedAbis>
+    <AndroidUseSharedRuntime>True</AndroidUseSharedRuntime>
+    <AndroidLinkMode>SdkOnly</AndroidLinkMode>
+    <BundleAssemblies>False</BundleAssemblies>
+    <AndroidCreatePackagePerAbi>False</AndroidCreatePackagePerAbi>
+    <AndroidEnableMultiDex>False</AndroidEnableMultiDex>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>full</DebugType>
@@ -149,6 +154,7 @@
     <Compile Include="EntryActivityClasses\StandardStringView.cs" />
     <Compile Include="EntryActivityClasses\ToggleVisibilityPopupMenuItem.cs" />
     <Compile Include="EntryActivityClasses\WriteBinaryToFilePopupItem.cs" />
+    <Compile Include="FileSelectHelper.cs" />
     <Compile Include="FingerprintModule.cs" />
     <Compile Include="FingerprintSamsungIdentifier.cs" />
     <Compile Include="FingerprintSetupActivity.cs" />
@@ -293,6 +299,9 @@
     <AndroidResource Include="Resources\layout\fingerprint_setup.xml">
       <SubType>Designer</SubType>
     </AndroidResource>
+    <AndroidResource Include="Resources\layout\httpcredentials.axml">
+      <SubType>Designer</SubType>
+    </AndroidResource>
     <None Include="settings\RoundsPreference %28Kopie%29.cs">
       <Visible>False</Visible>
     </None>
@@ -423,7 +432,7 @@
     <AndroidResource Include="Resources\drawable-mdpi\ic_storage_https.png" />
     <AndroidResource Include="Resources\drawable-mdpi\ic_storage_owncloud.png" />
     <AndroidResource Include="Resources\drawable-mdpi\ic_storage_sftp.png" />
-    <AndroidResource Include="Resources\drawable-mdpi\ic_storage_skydrive.png" />
+    <AndroidResource Include="Resources\drawable-mdpi\ic_storage_onedrive.png" />
     <AndroidResource Include="Resources\drawable-mdpi\ic00.png" />
     <AndroidResource Include="Resources\drawable-mdpi\ic01.png" />
     <AndroidResource Include="Resources\drawable-mdpi\ic02.png" />
@@ -677,7 +686,9 @@
     <AndroidResource Include="Resources\layout\QuickUnlock.xml">
       <SubType>Designer</SubType>
     </AndroidResource>
-    <AndroidResource Include="Resources\layout\url_credentials.xml" />
+    <AndroidResource Include="Resources\layout\url_credentials.xml">
+      <SubType>Designer</SubType>
+    </AndroidResource>
     <AndroidResource Include="Resources\drawable\section_header.xml" />
     <AndroidResource Include="Resources\drawable\extra_string_header.xml" />
     <AndroidResource Include="Resources\layout\entry_edit_section.xml">
@@ -699,7 +710,9 @@
     </AndroidResource>
     <AndroidResource Include="Resources\values-sr\strings.xml" />
     <AndroidResource Include="Resources\values-sv\strings.xml" />
-    <AndroidResource Include="Resources\values-tr\strings.xml" />
+    <AndroidResource Include="Resources\values-tr\strings.xml">
+      <SubType>Designer</SubType>
+    </AndroidResource>
     <AndroidResource Include="Resources\values-vi\strings.xml" />
     <AndroidResource Include="Resources\values-de\strings.xml">
       <SubType>Designer</SubType>
@@ -719,7 +732,9 @@
     <AndroidResource Include="Resources\values-ru\strings.xml" />
     <AndroidResource Include="Resources\values-sk\strings.xml" />
     <AndroidResource Include="Resources\values-uk\strings.xml" />
-    <AndroidResource Include="Resources\values-zh-rCN\strings.xml" />
+    <AndroidResource Include="Resources\values-zh-rCN\strings.xml">
+      <SubType>Designer</SubType>
+    </AndroidResource>
     <AndroidResource Include="Resources\values-zh-rTW\strings.xml" />
     <AndroidResource Include="Resources\layout\InViewButton.xml">
       <SubType>Designer</SubType>
@@ -769,6 +784,10 @@
     <ProjectReference Include="..\Kp2aKeyboardBinding\Kp2aKeyboardBinding.csproj">
       <Project>{A8779D4D-7C49-4C2F-82BD-2CDC448391DA}</Project>
       <Name>Kp2aKeyboardBinding</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\netftpandroid\System.Net.FtpClient\System.Net.FtpClient.Android.csproj">
+      <Project>{146FD497-BA03-4740-B6C5-5C84EA8FCDE2}</Project>
+      <Name>System.Net.FtpClient.Android</Name>
     </ProjectReference>
     <ProjectReference Include="..\PluginSdkBinding\PluginSdkBinding.csproj">
       <Project>{3DA3911E-36DE-465E-8F15-F1991B6437E5}</Project>
@@ -1096,7 +1115,7 @@
     <AndroidResource Include="Resources\drawable-xhdpi\ic_storage_sftp.png" />
   </ItemGroup>
   <ItemGroup>
-    <AndroidResource Include="Resources\drawable-xhdpi\ic_storage_skydrive.png" />
+    <AndroidResource Include="Resources\drawable-xhdpi\ic_storage_onedrive.png" />
   </ItemGroup>
   <ItemGroup>
     <AndroidResource Include="Resources\drawable-xhdpi\ic00.png" />
@@ -1681,6 +1700,11 @@
   </ItemGroup>
   <ItemGroup>
     <AndroidResource Include="Resources\drawable-mdpi\ic_fp_40px.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="Resources\layout\ftpcredentials.xml">
+      <SubType>Designer</SubType>
+    </AndroidResource>
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\Xamarin\Android\Xamarin.Android.CSharp.targets" />
   <Import Project="..\packages\Xamarin.Insights.1.11.3\build\MonoAndroid10\Xamarin.Insights.targets" Condition="Exists('..\packages\Xamarin.Insights.1.11.3\build\MonoAndroid10\Xamarin.Insights.targets')" />

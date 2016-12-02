@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.FtpClient;
+using System.Reflection;
+using System.Threading;
 using Android.Content;
 using Android.OS;
 using Android.Preferences;
@@ -14,82 +16,234 @@ namespace keepass2android.Io
 {
 	public class NetFtpFileStorage: IFileStorage
 	{
-		struct ConnectionSettings
+		class RetryConnectFtpClient : FtpClient
 		{
-			public FtpEncryptionMode EncryptionMode {get; set; }
-
-			public static ConnectionSettings FromIoc(IOConnectionInfo ioc)
+			protected override FtpClient CloneConnection()
 			{
-				if (ioc.Path.StartsWith(Kp2AAccountPathPrefix))
-					throw new InvalidOperationException("cannot extract settings from account-path");
-				string path = ioc.Path;
-				int schemeLength = path.IndexOf("://", StringComparison.Ordinal);
-				path = path.Substring(schemeLength + 3);
-				string settings = path.Substring(0, path.IndexOf("/", StringComparison.Ordinal));
-				return new ConnectionSettings()
-				{
-					EncryptionMode = (FtpEncryptionMode) int.Parse(settings)
-				};
+				RetryConnectFtpClient conn = new RetryConnectFtpClient();
 
+				conn.m_isClone = true;
+
+				foreach (PropertyInfo prop in GetType().GetProperties())
+				{
+					object[] attributes = prop.GetCustomAttributes(typeof(FtpControlConnectionClone), true);
+
+					if (attributes != null && attributes.Length > 0)
+					{
+						prop.SetValue(conn, prop.GetValue(this, null), null);
+					}
+				}
+
+				// always accept certficate no matter what because if code execution ever
+				// gets here it means the certificate on the control connection object being
+				// cloned was already accepted.
+				conn.ValidateCertificate += new FtpSslValidation(
+					delegate(FtpClient obj, FtpSslValidationEventArgs e)
+					{
+						e.Accept = true;
+					});
+
+				return conn;
+			}
+
+			private static T DoInRetryLoop<T>(Func<T> func)
+			{
+				double timeout = 30.0;
+				double timePerRequest = 1.0;
+				var startTime = DateTime.Now;
+				while (true)
+				{
+					var attemptStartTime = DateTime.Now;
+					try
+					{
+						return func();
+					}
+					catch (System.Net.Sockets.SocketException e)
+					{
+						if ((e.ErrorCode != 10061) || (DateTime.Now > startTime.AddSeconds(timeout)))
+						{
+							throw;
+						}
+						double secondsSinceAttemptStart = (DateTime.Now - attemptStartTime).TotalSeconds;
+						if (secondsSinceAttemptStart < timePerRequest)
+						{
+							Thread.Sleep(TimeSpan.FromSeconds(timePerRequest - secondsSinceAttemptStart));
+						}
+					}
+				}
+			}
+			public override void Connect()
+			{
+				DoInRetryLoop(() =>
+				{
+					base.Connect();
+					return true;
+				}
+				);
 			}
 		}
 
-		private const string Kp2AAccountPathPrefix = "__kp2a_account__";
-		private readonly Context _context;
-
-		public NetFtpFileStorage(Context context)
+		public struct ConnectionSettings
 		{
-			_context = context;
+			public FtpEncryptionMode EncryptionMode {get; set; }
+
+			public string Username
+			{
+				get;set;
+			}
+			public string Password
+			{
+				get;
+				set;
+			}
+			
+			public static ConnectionSettings FromIoc(IOConnectionInfo ioc)
+			{
+				if (!string.IsNullOrEmpty(ioc.UserName))
+				{
+					//legacy support
+					return new ConnectionSettings()
+					{
+						EncryptionMode = FtpEncryptionMode.None,
+						Username = ioc.UserName,
+						Password = ioc.Password
+					};
+				}
+
+				string path = ioc.Path;
+				int schemeLength = path.IndexOf("://", StringComparison.Ordinal);
+				path = path.Substring(schemeLength + 3);
+				string settings = path.Substring(0, path.IndexOf(SettingsPostFix, StringComparison.Ordinal));
+				if (!settings.StartsWith(SettingsPrefix))
+					throw new Exception("unexpected settings in path");
+				settings = settings.Substring(SettingsPrefix.Length);
+				var tokens = settings.Split(Separator);
+				return new ConnectionSettings()
+				{
+					EncryptionMode = (FtpEncryptionMode) int.Parse(tokens[2]),
+					Username = tokens[0],
+					Password = tokens[1]
+				};
+
+			}
+
+			public const string SettingsPrefix = "SET";
+			public const string SettingsPostFix = "#";
+			public const char Separator = ':';
+			public override string ToString()
+			{
+				return SettingsPrefix + 
+					System.Net.WebUtility.UrlEncode(Username) + Separator +
+					WebUtility.UrlEncode(Password) + Separator +
+				       (int) EncryptionMode;
+				;
+			}
+		}
+
+		private readonly ICertificateValidationHandler _app;
+
+		public MemoryStream traceStream;
+
+		public NetFtpFileStorage(Context context, ICertificateValidationHandler app)
+		{
+			_app = app;
+			traceStream = new MemoryStream();
+			FtpTrace.AddListener(new System.Diagnostics.TextWriterTraceListener(traceStream));
+			
 		}
 
 		public IEnumerable<string> SupportedProtocols
 		{
-			get { yield return "ftp"; }
+			get 
+			{ 
+				yield return "ftp";
+			}
 		}
 
 		public void Delete(IOConnectionInfo ioc)
 		{
-			using (FtpClient client = GetClient(ioc))
+			try
 			{
-				client.DeleteFile(IocPathToUri(ioc.Path).PathAndQuery);
+				using (FtpClient client = GetClient(ioc))
+				{
+					string localPath = IocToUri(ioc).PathAndQuery;
+					if (client.DirectoryExists(localPath))
+						client.DeleteDirectory(localPath, true);
+					else
+						client.DeleteFile(localPath);
+				}
+				
 			}
+			catch (FtpCommandException ex)
+				{
+					throw ConvertException(ex);
+				}
+		
+	}
+
+		public static Exception ConvertException(Exception exception)
+		{
+			if (exception is FtpCommandException)
+			{
+				var ftpEx = (FtpCommandException) exception;
+
+				if (ftpEx.CompletionCode == "550")
+					throw new FileNotFoundException(exception.Message, exception);
+			}
+
+			return exception;
 		}
 
 
 		internal FtpClient GetClient(IOConnectionInfo ioc, bool enableCloneClient = true)
 		{
-			FtpClient client = new FtpClient();
-			if ((ioc.UserName.Length > 0) || (ioc.Password.Length > 0))
-				client.Credentials = new NetworkCredential(ioc.UserName, ioc.Password);
+			var settings = ConnectionSettings.FromIoc(ioc);
+			
+			FtpClient client = new RetryConnectFtpClient();
+			if ((settings.Username.Length > 0) || (settings.Password.Length > 0))
+				client.Credentials = new NetworkCredential(settings.Username, settings.Password);
 			else
 				client.Credentials = new NetworkCredential("anonymous", ""); //TODO TEST
 
-			Uri uri = IocPathToUri(ioc.Path);
+			Uri uri = IocToUri(ioc);
 			client.Host = uri.Host;
 			if (!uri.IsDefaultPort) //TODO test
 				client.Port = uri.Port;
 			
-			//TODO Validate 
-			//client.ValidateCertificate += app...
+			client.ValidateCertificate += (control, args) =>
+			{
+				args.Accept = _app.CertificateValidationCallback(control, args.Certificate, args.Chain, args.PolicyErrors);
+			};
 
-			// we don't need to be thread safe in a classic sense, but OpenRead and OpenWrite don't 
-			//perform the actual stream operation so we'd need to wrap the stream (or just enable this:)
-			client.EnableThreadSafeDataConnections = enableCloneClient;
-
-			client.EncryptionMode = ConnectionSettings.FromIoc(ioc).EncryptionMode;
-
+			client.EncryptionMode = settings.EncryptionMode;
+			
 			client.Connect();
 			return client;
+			
 		}
 
-		internal Uri IocPathToUri(string path)
+
+		
+
+		internal Uri IocToUri(IOConnectionInfo ioc)
 		{
-			//remove addition stuff like TLS param
+			if (!string.IsNullOrEmpty(ioc.UserName))
+			{
+				//legacy support.
+				return new Uri(ioc.Path);
+			}
+			string path = ioc.Path;
+			//remove additional stuff like TLS param
 			int schemeLength = path.IndexOf("://", StringComparison.Ordinal);
 			string scheme = path.Substring(0, schemeLength);
 			path = path.Substring(schemeLength + 3);
-			string settings = path.Substring(0, path.IndexOf("/", StringComparison.Ordinal));
-			path = path.Substring(settings.Length + 1);
+			if (path.StartsWith(ConnectionSettings.SettingsPrefix))
+			{
+				//this should always be the case. However, in rare cases we might get an ioc with legacy path but no username set (if they only want to get a display name)
+				string settings = path.Substring(0, path.IndexOf(ConnectionSettings.SettingsPostFix, StringComparison.Ordinal));
+				path = path.Substring(settings.Length + 1);
+				
+			}
 			return new Uri(scheme + "://" + path);
 		}
 
@@ -99,8 +253,10 @@ namespace keepass2android.Io
 			int schemeLength = basePath.IndexOf("://", StringComparison.Ordinal);
 			string scheme = basePath.Substring(0, schemeLength);
 			basePath = basePath.Substring(schemeLength + 3);
-			string baseSettings = basePath.Substring(0, basePath.IndexOf("/", StringComparison.Ordinal));
-			return scheme + "://" + baseSettings + "/" + uri.AbsolutePath; //TODO does this contain Query?
+			string baseSettings = basePath.Substring(0, basePath.IndexOf(ConnectionSettings.SettingsPostFix, StringComparison.Ordinal));
+			basePath = basePath.Substring(baseSettings.Length+1);
+			string baseHost = basePath.Substring(0, basePath.IndexOf("/", StringComparison.Ordinal));
+			return scheme + "://" + baseSettings + ConnectionSettings.SettingsPostFix + baseHost + uri.AbsolutePath; //TODO does this contain Query?
 		}
 
 
@@ -116,101 +272,141 @@ namespace keepass2android.Io
 
 		public Stream OpenFileForRead(IOConnectionInfo ioc)
 		{
-			using (var cl = GetClient(ioc))
+			try
 			{
-				return cl.OpenRead(IocPathToUri(ioc.Path).PathAndQuery, FtpDataType.Binary, 0);
+				using (var cl = GetClient(ioc))
+				{
+					return cl.OpenRead(IocToUri(ioc).PathAndQuery, FtpDataType.Binary, 0);
+				}
+			}
+			catch (FtpCommandException ex)
+			{
+				throw ConvertException(ex);
 			}
 		}
 
 		public IWriteTransaction OpenWriteTransaction(IOConnectionInfo ioc, bool useFileTransaction)
 		{
-			if (useFileTransaction)
-				return new UntransactedWrite(ioc, this);
-			else
-				return new TransactedWrite(ioc, this);
+			try
+			{
+
+
+				if (!useFileTransaction)
+					return new UntransactedWrite(ioc, this);
+				else
+					return new TransactedWrite(ioc, this);
+			}
+			catch (FtpCommandException ex)
+			{
+				throw ConvertException(ex);
+			}
 		}
 
 		public string GetFilenameWithoutPathAndExt(IOConnectionInfo ioc)
 		{
-			//TODO does this work when flags are encoded in the iocPath?
 			return UrlUtil.StripExtension(
 				UrlUtil.GetFileName(ioc.Path));
 		}
 
 		public bool RequiresCredentials(IOConnectionInfo ioc)
 		{
-			return ioc.CredSaveMode != IOCredSaveMode.SaveCred;
+			return false;
 		}
 
 		public void CreateDirectory(IOConnectionInfo ioc, string newDirName)
 		{
-			using (var client = GetClient(ioc))
+			try
 			{
-				client.CreateDirectory(IocPathToUri(ioc.Path).PathAndQuery);
+				using (var client = GetClient(ioc))
+				{
+					client.CreateDirectory(IocToUri(GetFilePath(ioc, newDirName)).PathAndQuery);
+				}
+			}
+			catch (FtpCommandException ex)
+			{
+				throw ConvertException(ex);
 			}
 		}
 
 		public IEnumerable<FileDescription> ListContents(IOConnectionInfo ioc)
 		{
-			using (var client = GetClient(ioc))
+			try
 			{
-				List<FileDescription> files = new List<FileDescription>();
-				foreach (FtpListItem item in client.GetListing(IocPathToUri(ioc.Path).PathAndQuery,
-					FtpListOption.Modify | FtpListOption.Size | FtpListOption.DerefLinks))
+				using (var client = GetClient(ioc))
 				{
-
-					switch (item.Type)
+					List<FileDescription> files = new List<FileDescription>();
+					foreach (FtpListItem item in client.GetListing(IocToUri(ioc).PathAndQuery,
+						FtpListOption.Modify | FtpListOption.Size | FtpListOption.DerefLinks))
 					{
-						case FtpFileSystemObjectType.Directory:
-							files.Add(new FileDescription()
-							{
-								CanRead =  true, 
-								CanWrite = true,
-								DisplayName = item.Name,
-								IsDirectory = true,
-								LastModified = item.Modified,
-								Path = IocPathFromUri(ioc, new Uri(item.FullName))
-							});
-							break;
-						case FtpFileSystemObjectType.File:
-							files.Add(new FileDescription()
-							{
-								CanRead =  true, 
-								CanWrite = true,
-								DisplayName = item.Name,
-								IsDirectory = false,
-								LastModified = item.Modified,
-								Path = IocPathFromUri(ioc, new Uri(item.FullName)),
-								SizeInBytes = item.Size
-							});
-							break;
-						
+
+						switch (item.Type)
+						{
+							case FtpFileSystemObjectType.Directory:
+								files.Add(new FileDescription()
+								{
+									CanRead = true,
+									CanWrite = true,
+									DisplayName = item.Name,
+									IsDirectory = true,
+									LastModified = item.Modified,
+									Path = IocPathFromUri(ioc, new Uri(item.FullName))
+								});
+								break;
+							case FtpFileSystemObjectType.File:
+								files.Add(new FileDescription()
+								{
+									CanRead = true,
+									CanWrite = true,
+									DisplayName = item.Name,
+									IsDirectory = false,
+									LastModified = item.Modified,
+									Path = IocPathFromUri(ioc, new Uri(item.FullName)),
+									SizeInBytes = item.Size
+								});
+								break;
+
+						}
 					}
+					return files;
 				}
-				return files;
+			}
+			catch (FtpCommandException ex)
+			{
+				throw ConvertException(ex);
 			}
 		}
 
 		
 		public FileDescription GetFileDescription(IOConnectionInfo ioc)
 		{
-			//TODO when is this called? 
-			//is it very inefficient to connect for each description?
-
-			using (FtpClient client = GetClient(ioc))
+			try
 			{
-				var uri = IocPathToUri(ioc.Path);
-				string path = uri.PathAndQuery;
-				return new FileDescription()
+				//TODO when is this called? 
+				//is it very inefficient to connect for each description?
+
+				using (FtpClient client = GetClient(ioc))
 				{
-					CanRead = true,
-					CanWrite = true,
-					Path = ioc.Path,
-					LastModified = client.GetModifiedTime(path),
-					SizeInBytes = client.GetFileSize(path),
-					DisplayName = UrlUtil.GetFileName(path),
-					IsDirectory = false
-				};
+					
+					var uri = IocToUri(ioc);
+					string path = uri.PathAndQuery;
+					if (!client.FileExists(path) && (!client.DirectoryExists(path)))
+						throw new FileNotFoundException();
+					var fileDesc = new FileDescription()
+					{
+						CanRead = true,
+						CanWrite = true,
+						Path = ioc.Path,
+						LastModified = client.GetModifiedTime(path),
+						SizeInBytes = client.GetFileSize(path),
+						DisplayName = UrlUtil.GetFileName(path)
+					};
+					fileDesc.IsDirectory = fileDesc.Path.EndsWith("/");
+					return fileDesc;
+				}
+			}
+			catch (FtpCommandException ex)
+			{
+				throw ConvertException(ex);
 			}
 		}
 
@@ -226,7 +422,7 @@ namespace keepass2android.Io
 
 		public void StartSelectFile(IFileStorageSetupInitiatorActivity activity, bool isForSave, int requestCode, string protocolId)
 		{
-			throw new NotImplementedException();
+			activity.PerformManualFileSelect(isForSave, requestCode, "ftp");
 		}
 
 		public void PrepareFileUsage(IFileStorageSetupInitiatorActivity activity, IOConnectionInfo ioc, int requestCode,
@@ -264,7 +460,7 @@ namespace keepass2android.Io
 
 		public string GetDisplayName(IOConnectionInfo ioc)
 		{
-			var uri = IocPathToUri(ioc.Path);
+			var uri = IocToUri(ioc);
 			return uri.ToString(); //TODO is this good?
 		}
 
@@ -298,39 +494,49 @@ namespace keepass2android.Io
 		{
 			return false;
 		}
-
-		public void ResolveAccount(IOConnectionInfo ioc)
-		{
-			string path = ioc.Path;
-			int schemeLength = path.IndexOf("://", StringComparison.Ordinal);
-			string scheme = path.Substring(0, schemeLength);
-			path = path.Substring(schemeLength+3);
-			if (path.StartsWith(Kp2AAccountPathPrefix))
-			{
-				string accountId = path.Substring(0, path.IndexOf("/", StringComparison.Ordinal));
-				path = path.Substring(accountId.Length + 1);
-
-				var prefs = PreferenceManager.GetDefaultSharedPreferences(_context);
-				string host = prefs.GetString(accountId + "_Host", null);
-				int port = prefs.GetInt(accountId + "_Port", 0 /* auto*/);
-				string initialPath = prefs.GetString(accountId + "_InitPath", "");
-				if (initialPath.StartsWith("/"))
-					initialPath = initialPath.Substring(1);
-				if ((!initialPath.EndsWith("/") && (initialPath != "")))
-					initialPath += "/";
-				int encMode = prefs.GetInt(accountId + "_EncMode", (int) FtpEncryptionMode.None);
-				string settings = encMode.ToString();
-				ioc.Path = scheme + "://" + settings + "/" + host + (port == 0 ? "" : (":" + port)) + "/" + initialPath + path;
-			}
-		}
-
 		public Stream OpenWrite(IOConnectionInfo ioc)
 		{
-			using (var client = GetClient(ioc))
+			try
 			{
-				return client.OpenWrite(IocPathToUri(ioc.Path).PathAndQuery);
+				using (var client = GetClient(ioc))
+				{
+					return client.OpenWrite(IocToUri(ioc).PathAndQuery);
+
+				}
+			}
+			catch (FtpCommandException ex)
+			{
+				throw ConvertException(ex);
 			}
 		}
+
+		public static int GetDefaultPort(FtpEncryptionMode encryption)
+		{
+			return new FtpClient() { EncryptionMode =  encryption}.Port;
+		}
+
+		public string BuildFullPath(string host, int port, string initialPath, string user, string password, FtpEncryptionMode encryption)
+		{
+			var connectionSettings = new ConnectionSettings()
+			{
+				EncryptionMode = encryption,
+				Username = user,
+				Password = password
+			};
+
+			string scheme = "ftp";
+
+			string fullPath = scheme + "://" + connectionSettings.ToString() + ConnectionSettings.SettingsPostFix + host;
+			if (port != GetDefaultPort(encryption))
+				fullPath += ":" + port;
+
+			if (!initialPath.StartsWith("/"))
+				initialPath = "/" + initialPath;
+			fullPath += initialPath;
+
+			return fullPath;
+		}
+
 	}
 
 	public class TransactedWrite : IWriteTransaction
@@ -339,7 +545,7 @@ namespace keepass2android.Io
 		private readonly NetFtpFileStorage _fileStorage;
 		private readonly IOConnectionInfo _iocTemp;
 		private FtpClient _client;
-
+		private Stream _stream;
 
 		public TransactedWrite(IOConnectionInfo ioc, NetFtpFileStorage fileStorage)
 		{
@@ -352,21 +558,54 @@ namespace keepass2android.Io
 
 		public void Dispose()
 		{
-			if (_client != null)
-				_client.Dispose();
-			_client = null;
+			if (_stream != null)
+				_stream.Dispose();
+			_stream = null;
 		}
 
 		public Stream OpenFile()
 		{
-			_client = _fileStorage.GetClient(_ioc, false);
-			return _client.OpenWrite(_fileStorage.IocPathToUri(_iocTemp.Path).PathAndQuery);
+			try
+			{
+
+				_client = _fileStorage.GetClient(_ioc, false);
+				_stream = _client.OpenWrite(_fileStorage.IocToUri(_iocTemp).PathAndQuery);
+				return _stream;
+			}
+			catch (FtpCommandException ex)
+			{
+				throw NetFtpFileStorage.ConvertException(ex);
+			}
 		}
 
 		public void CommitWrite()
 		{
-			_client.DeleteFile(_fileStorage.IocPathToUri(_ioc.Path).PathAndQuery);
-			_client.Rename(_fileStorage.IocPathToUri(_iocTemp.Path).PathAndQuery, _fileStorage.IocPathToUri(_ioc.Path).PathAndQuery);
+			try
+			{
+				Android.Util.Log.Debug("NETFTP","connected: " + _client.IsConnected.ToString());
+				_stream.Close();
+				Android.Util.Log.Debug("NETFTP", "connected: " + _client.IsConnected.ToString());
+
+				//make sure target file does not exist:
+				//try
+				{
+					if (_client.FileExists(_fileStorage.IocToUri(_ioc).PathAndQuery))
+						_client.DeleteFile(_fileStorage.IocToUri(_ioc).PathAndQuery);
+
+				}
+				//catch (FtpCommandException)
+				{
+					//TODO get a new clien? might be stale
+				}
+
+				_client.Rename(_fileStorage.IocToUri(_iocTemp).PathAndQuery,
+					_fileStorage.IocToUri(_ioc).PathAndQuery);
+				
+			}
+			catch (FtpCommandException ex)
+			{
+				throw NetFtpFileStorage.ConvertException(ex);
+			}
 		}
 	}
 
@@ -374,6 +613,7 @@ namespace keepass2android.Io
 	{
 		private readonly IOConnectionInfo _ioc;
 		private readonly NetFtpFileStorage _fileStorage;
+		private Stream _stream;
 
 		public UntransactedWrite(IOConnectionInfo ioc, NetFtpFileStorage fileStorage)
 		{
@@ -383,17 +623,20 @@ namespace keepass2android.Io
 
 		public void Dispose()
 		{
-			
+			if (_stream != null)
+				_stream.Dispose();
+			_stream = null;
 		}
 
 		public Stream OpenFile()
 		{
-			return _fileStorage.OpenWrite(_ioc);
+			_stream = _fileStorage.OpenWrite(_ioc);
+			return _stream;
 		}
 
 		public void CommitWrite()
 		{
-			
+			_stream.Close();
 		}
 	}
 }

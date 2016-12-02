@@ -38,6 +38,8 @@ using TwofishCipher;
 using Keepass2android.Pluginsdk;
 using keepass2android.Io;
 using keepass2android.addons.OtpKeyProv;
+using Keepass2android.Javafilestorage;
+using GoogleDriveFileStorage = keepass2android.Io.GoogleDriveFileStorage;
 
 namespace keepass2android
 {
@@ -458,7 +460,7 @@ namespace keepass2android
 		{
 			IFileStorage fileStorage;
 			if (iocInfo.IsLocalFile())
-				fileStorage = new BuiltInFileStorage(this);
+				fileStorage = new LocalFileStorage(this);
 			else
 			{
 				IFileStorage innerFileStorage = GetCloudFileStorage(iocInfo);
@@ -509,11 +511,15 @@ namespace keepass2android
 							new DropboxFileStorage(Application.Context, this),
 							new DropboxAppFolderFileStorage(Application.Context, this),
 							new GoogleDriveFileStorage(Application.Context, this),
-							new SkyDriveFileStorage(Application.Context, this),
+							new OneDriveFileStorage(Application.Context, this),
 							new SftpFileStorage(this),
+							new NetFtpFileStorage(Application.Context, this),
+							new WebDavFileStorage(this),
+							//new LegacyWebDavStorage(this),
+							//new LegacyFtpStorage(this),
 #endif
 #endif
-							new BuiltInFileStorage(this)
+							new LocalFileStorage(this)
 						};
 				}
 				return _fileStorages;
@@ -529,24 +535,21 @@ namespace keepass2android
 				});
 		}
 
+		public bool AlwaysFailOnValidationError()
+		{
+			return true;
+		}
+
+		public bool OnValidationError()
+		{
+			return false;
+		}
+
 		public RemoteCertificateValidationCallback CertificateValidationCallback
 		{
 			get
 			{
-				var prefs = PreferenceManager.GetDefaultSharedPreferences(Application.Context);
-
-				ValidationMode validationMode = ValidationMode.Warn;
-
-				string strValMode = prefs.GetString(Application.Context.Resources.GetString(Resource.String.AcceptAllServerCertificates_key),
-													 Application.Context.Resources.GetString(Resource.String.AcceptAllServerCertificates_default));
-
-				if (strValMode == "IGNORE")
-					validationMode = ValidationMode.Ignore;
-				else if (strValMode == "ERROR")
-					validationMode = ValidationMode.Error;
-				;
-
-				switch (validationMode)
+				switch (GetValidationMode())
 				{
 					case ValidationMode.Ignore:
 						return (sender, certificate, chain, errors) => true;
@@ -554,11 +557,7 @@ namespace keepass2android
 						return (sender, certificate, chain, errors) =>
 						{
 							if (errors != SslPolicyErrors.None)
-								ShowToast(Application.Context.GetString(Resource.String.CertificateWarning,
-															new Java.Lang.Object[]
-					                                        {
-						                                       errors.ToString()
-					                                        }));
+								ShowValidationWarning(errors.ToString());
 							return true;
 						};
 						
@@ -578,6 +577,22 @@ namespace keepass2android
 
 		}
 
+		private ValidationMode GetValidationMode()
+		{
+			var prefs = PreferenceManager.GetDefaultSharedPreferences(Application.Context);
+
+			ValidationMode validationMode = ValidationMode.Warn;
+
+			string strValMode = prefs.GetString(Application.Context.Resources.GetString(Resource.String.AcceptAllServerCertificates_key),
+												 Application.Context.Resources.GetString(Resource.String.AcceptAllServerCertificates_default));
+
+			if (strValMode == "IGNORE")
+				validationMode = ValidationMode.Ignore;
+			else if (strValMode == "ERROR")
+				validationMode = ValidationMode.Error;
+			return validationMode;
+		}
+
 		public bool CheckForDuplicateUuids
 		{
 			get
@@ -585,6 +600,49 @@ namespace keepass2android
 				var prefs = PreferenceManager.GetDefaultSharedPreferences(Application.Context);
 				return prefs.GetBoolean(Application.Context.GetString(Resource.String.CheckForDuplicateUuids_key), true);
 			}
+		}
+
+		public ICertificateErrorHandler CertificateErrorHandler
+		{
+			get { return new CertificateErrorHandlerImpl(this); }
+		}
+
+		public class CertificateErrorHandlerImpl : Java.Lang.Object, Keepass2android.Javafilestorage.ICertificateErrorHandler
+		{
+			private readonly Kp2aApp _app;
+
+			public CertificateErrorHandlerImpl(Kp2aApp app)
+			{
+				_app = app;
+			}
+
+			public bool AlwaysFailOnValidationError()
+			{
+				return _app.GetValidationMode() == ValidationMode.Error;
+			}
+
+
+			public bool OnValidationError(string errorMessage)
+			{
+				switch (_app.GetValidationMode())
+				{
+					case ValidationMode.Ignore:
+						return true;
+					case ValidationMode.Warn:
+						_app.ShowValidationWarning(errorMessage);
+						return true;
+					case ValidationMode.Error:
+						return false;
+					default:
+						throw new Exception("Unexpected Validation mode!");
+				}
+
+			}
+		}
+
+		private void ShowValidationWarning(string error)
+		{
+			ShowToast(Application.Context.GetString(Resource.String.CertificateWarning, error));
 		}
 
 
@@ -683,7 +741,7 @@ namespace keepass2android
 
 		public void ClearOfflineCache()
 		{
-			new CachingFileStorage(new BuiltInFileStorage(this), Application.Context.CacheDir.Path, this).ClearCache();
+			new CachingFileStorage(new LocalFileStorage(this), Application.Context.CacheDir.Path, this).ClearCache();
 		}
 
 		public IFileStorage GetFileStorage(string protocolId)
@@ -699,7 +757,7 @@ namespace keepass2android
 		{
 
 			if (iocInfo.IsLocalFile())
-				return new BuiltInFileStorage(this);
+				return new LocalFileStorage(this);
 			else
 			{
 				IFileStorage innerFileStorage = GetCloudFileStorage(iocInfo);
