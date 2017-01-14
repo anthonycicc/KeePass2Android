@@ -85,7 +85,7 @@ namespace KeePassLib.Keys
 			strUserDir = UrlUtil.EnsureTerminatingSeparator(strUserDir, false);
 			strUserDir += PwDefs.ShortProductName;
 
-			if(bCreate && !Directory.Exists(strUserDir))
+			if (bCreate && !Directory.Exists(strUserDir))
 				Directory.CreateDirectory(strUserDir);
 
 			strUserDir = UrlUtil.EnsureTerminatingSeparator(strUserDir, false);
@@ -101,9 +101,9 @@ namespace KeePassLib.Keys
 			{
 				throw new NotSupportedException("DataProtection not supported on MonoForAndroid!");
 			}
-			catch(Exception exLoad)
+			catch (Exception exLoad)
 			{
-				if(bShowWarning) MessageService.ShowWarning(exLoad);
+				if (bShowWarning) MessageService.ShowWarning(exLoad);
 
 				pbKey = null;
 			}
@@ -121,7 +121,7 @@ namespace KeePassLib.Keys
 			{
 				throw new NotSupportedException("DataProtection not supported on MonoForAndroid!");
 			}
-			catch(Exception) { pbKey = null; }
+			catch (Exception) { pbKey = null; }
 #endif
 
 			return pbKey;

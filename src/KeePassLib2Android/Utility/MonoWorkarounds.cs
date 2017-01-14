@@ -24,6 +24,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Xml;
 
 
@@ -34,6 +35,8 @@ namespace KeePassLib.Utility
 	public static class MonoWorkarounds
 	{
 		private static Dictionary<uint, bool> m_dForceReq = new Dictionary<uint, bool>();
+		private static Thread m_thFixClip = null;
+
 
 		private static bool? m_bReq = null;
 		public static bool IsRequired()
@@ -114,6 +117,17 @@ namespace KeePassLib.Utility
 		// 3574233558:
 		//   Problems with minimizing windows, no content rendered.
 		//   https://sourceforge.net/p/keepass/discussion/329220/thread/d50a79d6/
+		//   https://bugs.launchpad.net/ubuntu/+source/keepass2/+bug/801414
+		// 891029:
+		//   Increase tab control height, otherwise Mono throws exceptions.
+		//   https://sourceforge.net/projects/keepass/forums/forum/329221/topic/4519750
+		//   https://bugs.launchpad.net/ubuntu/+source/keepass2/+bug/891029
+		// 836428016:
+		//   ListView group header selection unsupported.
+		//   https://sourceforge.net/p/keepass/discussion/329221/thread/31dae0f0/
+		// 3574233558:
+		//   Problems with minimizing windows, no content rendered.
+		//   https://sourceforge.net/p/keepass/discussion/329220/thread/d50a79d6/
 		public static bool IsRequired(uint uBugID)
 		{
 			if(!MonoWorkarounds.IsRequired()) return false;
@@ -143,6 +157,26 @@ namespace KeePassLib.Utility
 				uint uID;
 				if(StrUtil.TryParseUInt(strID.Trim(), out uID))
 					m_dForceReq[uID] = bEnabled;
+			}
+		}
+
+		internal static void Initialize()
+		{
+			Terminate();
+
+			// m_fOwnWindow = fOwnWindow;
+
+			
+		}
+
+		internal static void Terminate()
+		{
+			if(m_thFixClip != null)
+			{
+				try { m_thFixClip.Abort(); }
+				catch(Exception) { Debug.Assert(false); }
+
+				m_thFixClip = null;
 			}
 		}
 

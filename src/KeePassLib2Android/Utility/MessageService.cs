@@ -121,16 +121,16 @@ namespace KeePassLib.Utility
 
 		private static string ObjectsToMessage(object[] vLines, bool bFullExceptions)
 		{
-			if(vLines == null) return string.Empty;
+			if (vLines == null) return string.Empty;
 
 			string strNewPara = MessageService.NewParagraph;
 
 			StringBuilder sbText = new StringBuilder();
 			bool bSeparator = false;
 
-			foreach(object obj in vLines)
+			foreach (object obj in vLines)
 			{
-				if(obj == null) continue;
+				if (obj == null) continue;
 
 				string strAppend = null;
 
@@ -140,33 +140,33 @@ namespace KeePassLib.Utility
 				StringCollection scObj = (obj as StringCollection);
 #endif
 
-				if(exObj != null)
+				if (exObj != null)
 				{
-					if(bFullExceptions)
+					if (bFullExceptions)
 						strAppend = StrUtil.FormatException(exObj);
-					else if((exObj.Message != null) && (exObj.Message.Length > 0))
+					else if ((exObj.Message != null) && (exObj.Message.Length > 0))
 						strAppend = exObj.Message;
 				}
 #if (!KeePassLibSD && !KeePassRT)
-				else if(scObj != null)
+				else if (scObj != null)
 				{
 					StringBuilder sb = new StringBuilder();
-					foreach(string strCollLine in scObj)
+					foreach (string strCollLine in scObj)
 					{
-						if(sb.Length > 0) sb.AppendLine();
+						if (sb.Length > 0) sb.AppendLine();
 						sb.Append(strCollLine.TrimEnd());
 					}
 					strAppend = sb.ToString();
 				}
 #endif
-				else if(strObj != null)
+				else if (strObj != null)
 					strAppend = strObj;
 				else
 					strAppend = obj.ToString();
 
-				if(!string.IsNullOrEmpty(strAppend))
+				if (!string.IsNullOrEmpty(strAppend))
 				{
-					if(bSeparator) sbText.Append(strNewPara);
+					if (bSeparator) sbText.Append(strNewPara);
 					else bSeparator = true;
 
 					sbText.Append(strAppend);
@@ -233,7 +233,7 @@ namespace KeePassLib.Utility
 		}
 
 #if (!KeePassLibSD && !KeePassRT)
-	/*	internal delegate DialogResult SafeShowMessageBoxInternalDelegate(IWin32Window iParent,
+		/*	internal delegate DialogResult SafeShowMessageBoxInternalDelegate(IWin32Window iParent,
 			string strText, string strTitle, MessageBoxButtons mb, MessageBoxIcon mi,
 			MessageBoxDefaultButton mdb);
 
@@ -259,7 +259,7 @@ namespace KeePassLib.Utility
 			strTitle = (strTitle ?? PwDefs.ShortProductName);
 			string strText = ObjectsToMessage(vLines);
 
-			if(MessageService.MessageShowing != null)
+			if (MessageService.MessageShowing != null)
 				MessageService.MessageShowing(null, new MessageServiceEventArgs(
 					strTitle, strText, MessageBoxButtons.OK, m_mbiInfo));
 
@@ -286,7 +286,7 @@ namespace KeePassLib.Utility
 			string strTitle = PwDefs.ShortProductName;
 			string strText = ObjectsToMessage(vLines, bFullExceptions);
 
-			if(MessageService.MessageShowing != null)
+			if (MessageService.MessageShowing != null)
 				MessageService.MessageShowing(null, new MessageServiceEventArgs(
 					strTitle, strText, MessageBoxButtons.OK, m_mbiWarning));
 
@@ -317,9 +317,9 @@ Clipboard.SetText(ObjectsToMessage(vLines, true));*/
 				Clipboard.SetDataObject(ObjectsToMessage(vLines, true));
 #endif
 			}
-			catch(Exception) { Debug.Assert(false); }
+			catch (Exception) { Debug.Assert(false); }
 
-			if(MessageService.MessageShowing != null)
+			if (MessageService.MessageShowing != null)
 				MessageService.MessageShowing(null, new MessageServiceEventArgs(
 					strTitle, strText, MessageBoxButtons.OK, m_mbiFatal));
 
@@ -337,12 +337,12 @@ Clipboard.SetText(ObjectsToMessage(vLines, true));*/
 			string strTextEx = (strText ?? string.Empty);
 			string strTitleEx = (strTitle ?? PwDefs.ShortProductName);
 
-			if(MessageService.MessageShowing != null)
+			if (MessageService.MessageShowing != null)
 				MessageService.MessageShowing(null, new MessageServiceEventArgs(
 					strTitleEx, strTextEx, mbb, MessageBoxIcon.Question));
 
 			DialogResult dr = SafeShowMessageBox(strTextEx, strTitleEx, mbb,
-			                                     MessageBoxIcon.Question, MessageBoxDefaultButton.Button1);
+												 MessageBoxIcon.Question, MessageBoxDefaultButton.Button1);
 
 			--m_uCurrentMessageCount;
 			return dr;
@@ -356,12 +356,12 @@ Clipboard.SetText(ObjectsToMessage(vLines, true));*/
 			string strTextEx = (strText ?? string.Empty);
 			string strTitleEx = (strTitle ?? PwDefs.ShortProductName);
 
-			if(MessageService.MessageShowing != null)
+			if (MessageService.MessageShowing != null)
 				MessageService.MessageShowing(null, new MessageServiceEventArgs(
 					strTitleEx, strTextEx, MessageBoxButtons.YesNo, MessageBoxIcon.Question));
 
 			DialogResult dr = SafeShowMessageBox(strTextEx, strTitleEx,
-			                                     MessageBoxButtons.YesNo, MessageBoxIcon.Question, bDefaultToYes ?
+												 MessageBoxButtons.YesNo, MessageBoxIcon.Question, bDefaultToYes ?
 				MessageBoxDefaultButton.Button1 : MessageBoxDefaultButton.Button2);
 
 			--m_uCurrentMessageCount;
@@ -393,15 +393,15 @@ Clipboard.SetText(ObjectsToMessage(vLines, true));*/
 		{
 			string str = string.Empty;
 
-			if((strFilePath != null) && (strFilePath.Length > 0))
+			if ((strFilePath != null) && (strFilePath.Length > 0))
 				str += strFilePath + MessageService.NewParagraph;
 
 			str += KLRes.FileLoadFailed;
 
-			if((ex != null) && (ex.Message != null) && (ex.Message.Length > 0))
+			if ((ex != null) && (ex.Message != null) && (ex.Message.Length > 0))
 			{
 				str += MessageService.NewParagraph;
-				if(!bFullException) str += ex.Message;
+				if (!bFullException) str += ex.Message;
 				else str += ObjectsToMessage(new object[] { ex }, true);
 			}
 
@@ -410,7 +410,7 @@ Clipboard.SetText(ObjectsToMessage(vLines, true));*/
 
 		public static void ShowLoadWarning(IOConnectionInfo ioConnection, Exception ex)
 		{
-			if(ioConnection != null)
+			if (ioConnection != null)
 				ShowLoadWarning(ioConnection.GetDisplayName(), ex, false);
 			else ShowWarning(ex);
 		}
@@ -419,22 +419,22 @@ Clipboard.SetText(ObjectsToMessage(vLines, true));*/
 			bool bCorruptionWarning)
 		{
 			FileLockException fl = (ex as FileLockException);
-			if(fl != null)
+			if (fl != null)
 			{
 				ShowWarning(fl.Message);
 				return;
 			}
 
 			string str = string.Empty;
-			if((strFilePath != null) && (strFilePath.Length > 0))
+			if ((strFilePath != null) && (strFilePath.Length > 0))
 				str += strFilePath + MessageService.NewParagraph;
 
 			str += KLRes.FileSaveFailed;
 
-			if((ex != null) && (ex.Message != null) && (ex.Message.Length > 0))
+			if ((ex != null) && (ex.Message != null) && (ex.Message.Length > 0))
 				str += MessageService.NewParagraph + ex.Message;
 
-			if(bCorruptionWarning)
+			if (bCorruptionWarning)
 				str += MessageService.NewParagraph + KLRes.FileSaveCorruptionWarning;
 
 			ShowWarning(str);
@@ -443,7 +443,7 @@ Clipboard.SetText(ObjectsToMessage(vLines, true));*/
 		public static void ShowSaveWarning(IOConnectionInfo ioConnection, Exception ex,
 			bool bCorruptionWarning)
 		{
-			if(ioConnection != null)
+			if (ioConnection != null)
 				ShowSaveWarning(ioConnection.GetDisplayName(), ex, bCorruptionWarning);
 			else ShowWarning(ex);
 		}
